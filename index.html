@@ -1,0 +1,1631 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>LandNav - Frontend-only Landmark Navigation</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <style>
+        :root {
+            --bg-panel: rgba(15, 23, 42, 0.88);
+            --border-glass: rgba(148, 163, 184, 0.5);
+            --accent: #38bdf8;
+            --accent-strong: #0ea5e9;
+            --text-main: #e5e7eb;
+            --text-muted: #9ca3af;
+            --danger: #f97373;
+            --radius-lg: 18px;
+            --shadow-soft: 0 18px 45px rgba(15, 23, 42, 0.55);
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            color: var(--text-main);
+            background: radial-gradient(circle at top, #020617 0, #020617 40%, #020617 100%);
+            overflow: hidden;
+        }
+
+        #map {
+            position: fixed;
+            inset: 0;
+            height: 100vh;
+            width: 100vw;
+            z-index: 0;
+        }
+
+        .panel {
+            position: absolute;
+            z-index: 1000;
+            border-radius: var(--radius-lg);
+            background: var(--bg-panel);
+            border: 1px solid var(--border-glass);
+            box-shadow: var(--shadow-soft);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            gap: 8px;
+            cursor: move;
+        }
+
+        .panel-title {
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        .panel-subtitle {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+        }
+
+        .panel-toggle {
+            border-radius: 999px;
+            border: 1px solid rgba(148, 163, 184, 0.6);
+            padding: 2px 8px;
+            font-size: 0.7rem;
+            background: rgba(15, 23, 42, 0.9);
+            color: var(--text-main);
+            cursor: pointer;
+        }
+
+        .panel-toggle:hover {
+            border-color: var(--accent);
+        }
+
+        .panel-body {
+            padding: 8px 12px 10px;
+            overflow-y: auto;
+        }
+
+        .panel.collapsed .panel-body {
+            display: none;
+        }
+
+        .resize-handle {
+            position: absolute;
+            right: 4px;
+            bottom: 4px;
+            width: 14px;
+            height: 14px;
+            border-radius: 3px;
+            border: 1px solid rgba(148, 163, 184, 0.7);
+            background: rgba(15, 23, 42, 0.9);
+            cursor: se-resize;
+        }
+
+        .panel-header,
+        .instruction-main,
+        .resize-handle {
+            touch-action: none;
+        }
+
+        #setup-controls {
+            top: 16px;
+            right: 16px;
+            width: 360px;
+            max-width: 94vw;
+            max-height: calc(100vh - 32px);
+        }
+
+        .controls-inner {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .controls-title-pill {
+            font-size: 0.7rem;
+            padding: 2px 8px;
+            border-radius: 999px;
+            background: rgba(34, 197, 94, 0.15);
+            color: #bbf7d0;
+            border: 1px solid rgba(34, 197, 94, 0.35);
+            margin-left: 6px;
+            display: none;
+        }
+
+        .divider {
+            height: 1px;
+            width: 100%;
+            margin: 8px 0;
+            background: linear-gradient(to right, transparent, rgba(148, 163, 184, 0.5), transparent);
+        }
+
+        label {
+            display: block;
+            font-size: 0.78rem;
+            font-weight: 500;
+            color: #cbd5f5;
+            margin-bottom: 4px;
+        }
+
+        input[type="text"],
+        select {
+            width: 100%;
+            padding: 7px 10px;
+            border-radius: 10px;
+            border: 1px solid rgba(148, 163, 184, 0.5);
+            background: rgba(15, 23, 42, 0.85);
+            color: var(--text-main);
+            font-size: 0.85rem;
+            outline: none;
+            transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+        }
+
+        input[type="text"]::placeholder { color: #6b7280; }
+
+        input[type="text"]:focus,
+        select:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.35);
+            background: rgba(15, 23, 42, 0.98);
+        }
+
+        .field-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            margin-bottom: 4px;
+        }
+
+        .field-row {
+            display: flex;
+            gap: 8px;
+        }
+
+        .button-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            border-radius: 999px;
+            border: 1px solid transparent;
+            padding: 7px 14px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            cursor: pointer;
+            background: rgba(15, 23, 42, 0.95);
+            color: var(--text-main);
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: background 0.18s ease, transform 0.12s ease, box-shadow 0.18s ease, border-color 0.18s ease, opacity 0.18s ease;
+            white-space: nowrap;
+        }
+
+        button:disabled {
+            opacity: 0.55;
+            cursor: default;
+            transform: none;
+            box-shadow: none;
+        }
+
+        button:hover:not(:disabled) {
+            transform: translateY(-0.5px);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent-strong), #22c55e);
+            color: #0b1120;
+            border-color: transparent;
+            box-shadow: 0 10px 25px rgba(34, 197, 94, 0.25);
+            width: 100%;
+            justify-content: center;
+        }
+
+        .btn-ghost {
+            background: rgba(15, 23, 42, 0.95);
+            border-color: rgba(148, 163, 184, 0.5);
+        }
+
+        .btn-ghost:hover:not(:disabled) {
+            border-color: var(--accent);
+            box-shadow: 0 10px 25px rgba(15, 23, 42, 0.8);
+        }
+
+        .btn-small {
+            padding: 6px 10px;
+            font-size: 0.75rem;
+        }
+
+        .section-title {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #e5e7eb;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .section-title span {
+            font-size: 0.72rem;
+            font-weight: 400;
+            color: var(--text-muted);
+        }
+
+        .small {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            line-height: 1.4;
+        }
+
+        .warn {
+            color: var(--danger);
+            font-weight: 500;
+        }
+
+        .mode-panel {
+            border-radius: 12px;
+            border: 1px solid rgba(148, 163, 184, 0.35);
+            padding: 8px 10px;
+            background: rgba(15, 23, 42, 0.7);
+            margin-top: 4px;
+        }
+
+        .search-wrapper {
+            position: relative;
+        }
+
+        .suggestions {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            margin-top: 4px;
+            background: rgba(15, 23, 42, 0.98);
+            border-radius: 12px;
+            border: 1px solid rgba(148, 163, 184, 0.6);
+            box-shadow: 0 14px 35px rgba(15, 23, 42, 0.8);
+            max-height: 220px;
+            overflow-y: auto;
+            padding: 4px 0;
+            font-size: 0.78rem;
+            z-index: 1200;
+            display: none;
+        }
+
+        .suggestion-item {
+            padding: 6px 10px;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .suggestion-item:hover {
+            background: rgba(15, 23, 42, 0.9);
+        }
+
+        .suggestion-title {
+            font-weight: 500;
+            color: #e5e7eb;
+        }
+
+        .suggestion-sub {
+            color: #9ca3af;
+        }
+
+        #instructions-panel {
+            left: 16px;
+            top: 80px;
+            width: 320px;
+            max-width: 94vw;
+            max-height: calc(100vh - 100px);
+        }
+
+        #route-steps {
+            font-size: 0.8rem;
+        }
+
+        #route-steps ol {
+            margin-top: 4px;
+            padding-left: 18px;
+        }
+
+        #route-steps li {
+            margin-bottom: 4px;
+        }
+        
+        .instruction-distance {
+            font-weight: 400;
+            color: var(--text-muted);
+            margin-left: 4px;
+            font-size: 0.75rem;
+        }
+
+        .step-item {
+            padding: 4px 6px;
+            border-radius: 6px;
+            transition: background 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            gap:8px;
+        }
+
+        .step-past {
+            color: #6b7280;
+            opacity: 0.6;
+        }
+
+        .step-current {
+            background: rgba(56, 189, 248, 0.18);
+            color: #f9fafb;
+            font-weight: 600;
+            border-left: 3px solid var(--accent-strong);
+            padding-left: 7px;
+        }
+
+        .step-upcoming {
+            color: #e5e7eb;
+            opacity: 0.9;
+        }
+
+        .step-static {
+            color: #e5e7eb;
+        }
+
+        .instruction-box {
+            position: absolute;
+            z-index: 1000;
+            background: linear-gradient(135deg, rgba(15, 23, 42, 0.96), rgba(30, 64, 175, 0.96));
+            color: white;
+            padding: 10px 14px 14px;
+            border-radius: 18px;
+            max-width: min(680px, 96vw);
+            font-size: 0.95rem;
+            box-shadow: var(--shadow-soft);
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
+        }
+
+        .instruction-main {
+            font-size: 0.98rem;
+            font-weight: 600;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: move;
+        }
+
+        .instruction-main span.label {
+            font-size: 0.78rem;
+            font-weight: 500;
+            padding: 2px 8px;
+            border-radius: 999px;
+            background: rgba(15, 23, 42, 0.85);
+            border: 1px solid rgba(148, 163, 184, 0.4);
+        }
+
+        .instruction-body {
+            margin-top: 4px;
+        }
+
+        .stat-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-top: 4px;
+        }
+
+        .stat {
+            font-size: 0.8rem;
+            opacity: 0.95;
+        }
+
+        .stat strong { color: #e5e7eb; }
+
+        .highlight-landmark {
+            color: #fbbf24;
+            font-weight: 700;
+        }
+
+        /* Feedback buttons */
+        .feedback-btns {
+            display: inline-flex;
+            gap: 2px;
+            margin-left: 6px;
+            flex-shrink: 0;
+        }
+
+        .fb-btn {
+            padding: 2px 6px;
+            font-size: 0.7rem;
+            border-radius: 6px;
+            border: 1px solid rgba(148, 163, 184, 0.4);
+            background: rgba(15, 23, 42, 0.8);
+            color: var(--text-muted);
+            cursor: pointer;
+            line-height: 1;
+            transition: background 0.15s, border-color 0.15s, color 0.15s;
+        }
+
+        .fb-btn:hover {
+            border-color: var(--accent);
+            color: var(--text-main);
+        }
+
+        .fb-btn.fb-up.active {
+            background: rgba(34, 197, 94, 0.25);
+            border-color: rgba(34, 197, 94, 0.6);
+            color: #bbf7d0;
+        }
+
+        .fb-btn.fb-down.active {
+            background: rgba(239, 68, 68, 0.25);
+            border-color: rgba(239, 68, 68, 0.6);
+            color: #fca5a5;
+        }
+
+        .fb-count {
+            font-size: 0.65rem;
+            color: var(--text-muted);
+            margin-left: 2px;
+        }
+
+        .live-feedback-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 6px;
+            font-size: 0.78rem;
+            color: var(--text-muted);
+        }
+
+        .live-feedback-row .fb-btn {
+            padding: 3px 10px;
+            font-size: 0.78rem;
+        }
+
+        @media (max-width: 640px) {
+            #setup-controls {
+                left: 50%;
+                right: auto;
+                transform: translateX(-50%);
+                top: 10px;
+                width: calc(100vw - 24px);
+            }
+
+            #instructions-panel {
+                left: 50%;
+                transform: translateX(-50%);
+                top: auto;
+                bottom: 100px;
+                width: calc(100vw - 24px);
+            }
+
+            .resize-handle {
+                width: 20px;
+                height: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+
+    <div class="panel" id="setup-controls">
+        <div class="panel-header">
+            <div>
+                <div class="panel-title">
+                    LandNav
+                    <span class="controls-title-pill">Logic V2</span>
+                </div>
+                <div class="panel-subtitle">Landmark-based Navigation</div>
+            </div>
+            <button id="toggle-setup-panel" class="panel-toggle">▾</button>
+        </div>
+        <div class="panel-body">
+            <div class="controls-inner">
+                <div class="field-row">
+                    <div class="field-group" style="flex:1;">
+                        <label for="mode">Mode of Transport</label>
+                        <select id="mode">
+                            <option value="car" selected>Car</option>
+                            <option value="bike">Bike</option>
+                            <option value="cycle">Cycle</option>
+                            <option value="walk">Walk</option>
+                        </select>
+                    </div>
+
+                    <div class="field-group" style="flex:1;">
+                        <label for="time_of_day">Time of Day</label>
+                        <select id="time_of_day">
+                            <option value="day" selected>Day</option>
+                            <option value="night">Night</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="divider"></div>
+
+                <div class="field-group">
+                    <div class="section-title">
+                        Start location
+                        <span>Where you are starting from</span>
+                    </div>
+                    <select id="start-mode">
+                        <option value="gps">Use current GPS</option>
+                        <option value="tap">Tap on map</option>
+                        <option value="coords">Enter coordinates</option>
+                        <option value="search">Search place</option>
+                    </select>
+
+                    <div id="start-mode-gps" class="mode-panel">
+                        <button id="start-gps-btn" class="btn-ghost">📍 Use my current location</button>
+                        <div class="small">
+                            Uses your device GPS to place the start marker.
+                        </div>
+                    </div>
+
+                    <div id="start-mode-tap" class="mode-panel" style="display:none;">
+                        <button id="start-tap-btn" class="btn-ghost">🖱️ Enable tap on map</button>
+                        <div class="small">
+                            After enabling, tap anywhere on the map to set the start location.
+                        </div>
+                    </div>
+
+                    <div id="start-mode-coords" class="mode-panel" style="display:none;">
+                        <div class="field-row">
+                            <div class="field-group" style="flex:1;">
+                                <label for="start-lat">Lat</label>
+                                <input id="start-lat" type="text" placeholder="12.9716" />
+                            </div>
+                            <div class="field-group" style="flex:1;">
+                                <label for="start-lon">Lon</label>
+                                <input id="start-lon" type="text" placeholder="77.5946" />
+                            </div>
+                        </div>
+                        <button id="start-set-coords-btn" class="btn-ghost btn-small">
+                            Set start from lat/lon
+                        </button>
+                    </div>
+
+                    <div id="start-mode-search" class="mode-panel" style="display:none;">
+                        <div class="search-wrapper">
+                            <input id="start-search" type="text" placeholder="Type a place / address for start"/>
+                            <div id="start-suggestions" class="suggestions"></div>
+                        </div>
+                        <div class="small">
+                            Pick a result to set the start marker.
+                        </div>
+                    </div>
+                </div>
+
+                <div class="divider"></div>
+
+                <div class="field-group">
+                    <div class="section-title">
+                        Destination
+                        <span>Where you want to go</span>
+                    </div>
+                    <select id="end-mode">
+                        <option value="tap">Tap on map</option>
+                        <option value="coords">Enter coordinates</option>
+                        <option value="search">Search place</option>
+                        <option value="gps">Use current GPS</option>
+                    </select>
+
+                    <div id="end-mode-tap" class="mode-panel">
+                        <button id="end-tap-btn" class="btn-ghost">🎯 Enable tap on map</button>
+                        <div class="small">
+                            After enabling, tap on the map to set destination.
+                        </div>
+                    </div>
+
+                    <div id="end-mode-coords" class="mode-panel" style="display:none;">
+                        <div class="field-row">
+                            <div class="field-group" style="flex:1;">
+                                <label for="end-lat">Lat</label>
+                                <input id="end-lat" type="text" placeholder="12.9716" />
+                            </div>
+                            <div class="field-group" style="flex:1;">
+                                <label for="end-lon">Lon</label>
+                                <input id="end-lon" type="text" placeholder="77.5946" />
+                            </div>
+                        </div>
+                        <button id="end-set-coords-btn" class="btn-ghost btn-small">
+                            Set destination from lat/lon
+                        </button>
+                    </div>
+
+                    <div id="end-mode-search" class="mode-panel" style="display:none;">
+                        <div class="search-wrapper">
+                            <input id="end-search" type="text" placeholder="Type a place / address for destination"/>
+                            <div id="end-suggestions" class="suggestions"></div>
+                        </div>
+                        <div class="small">
+                            Pick a result to set the destination marker.
+                        </div>
+                    </div>
+
+                    <div id="end-mode-gps" class="mode-panel" style="display:none;">
+                        <button id="end-gps-btn" class="btn-ghost">📍 Use my current location</button>
+                        <div class="small">
+                            Sets your current location as destination.
+                        </div>
+                    </div>
+                </div>
+
+                <div class="field-group" style="margin-top:4px;">
+                    <button id="get-route-btn" class="btn-primary">
+                        ▶ Start Navigation
+                    </button>
+                </div>
+
+                <div class="divider"></div>
+
+                <div id="status" class="small"></div>
+            </div>
+        </div>
+        <div class="resize-handle"></div>
+    </div>
+
+    <div class="panel" id="instructions-panel">
+        <div class="panel-header">
+            <div>
+                <div class="panel-title">Landmark based instructions</div>
+                <div class="panel-subtitle">Turn-by-turn route with landmarks</div>
+            </div>
+            <button id="toggle-instructions-panel" class="panel-toggle">▾</button>
+        </div>
+        <div class="panel-body">
+            <div id="route-steps" class="small">
+                No route loaded yet.
+            </div>
+        </div>
+        <div class="resize-handle"></div>
+    </div>
+
+    <div class="instruction-box" id="instruction-box" style="display:none;">
+        <div class="instruction-main">
+            <span class="label">Next instruction</span>
+            <button id="toggle-bottom-panel" class="panel-toggle" style="margin-left:auto;">▾</button>
+        </div>
+        <div class="instruction-body" id="instruction-body">
+            <div id="instruction-text" style="font-size:1.05rem; margin-bottom:4px; font-weight:600;">Waiting...</div>
+            <div class="stat-row">
+                <div class="stat" id="distance-to-turn"></div>
+                <div class="stat" id="live-landmark-name"></div>
+                <!-- New: Decision distance stat -->
+                <div class="stat" id="decision-distance"></div>
+            </div>
+            <div class="live-feedback-row" id="live-feedback-row" style="display:none;">
+                Was this landmark helpful?
+                <button class="fb-btn fb-up" id="live-fb-up">&#x1F44D;</button>
+                <button class="fb-btn fb-down" id="live-fb-down">&#x1F44E; Replace</button>
+            </div>
+        </div>
+        <div class="resize-handle"></div>
+    </div>
+
+    <script>
+    const map = L.map('map').setView([13.0827, 80.2707], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap'
+    }).addTo(map);
+
+    const userIcon = L.icon({
+        iconUrl: 'https://cdn-icons-png.flaticon.com/512/149/149071.png',
+        iconSize: [36, 36],
+        iconAnchor: [18, 18]
+    });
+    const turnIcon = L.icon({
+        iconUrl: 'https://cdn-icons-png.flaticon.com/512/684/684908.png',
+        iconSize: [28, 28],
+        iconAnchor: [14, 14]
+    });
+    const landmarkIcon = L.icon({
+        iconUrl: 'https://cdn-icons-png.flaticon.com/512/1828/1828884.png',
+        iconSize: [28, 28],
+        iconAnchor: [14, 14]
+    });
+
+    const setupPanel = document.getElementById('setup-controls');
+    const instructionsPanel = document.getElementById('instructions-panel');
+    const instructionBox = document.getElementById('instruction-box');
+
+    function initPanelPosition(panel) {
+        const rect = panel.getBoundingClientRect();
+        panel.style.top = rect.top + 'px';
+        panel.style.left = rect.left + 'px';
+        panel.style.right = 'auto';
+        panel.style.bottom = 'auto';
+    }
+
+    function makeDraggable(panel, handleSelector) {
+        const handle = panel.querySelector(handleSelector) || panel;
+        let dragging = false, startX = 0, startY = 0, startLeft = 0, startTop = 0;
+
+        const startDrag = (clientX, clientY) => {
+            const rect = panel.getBoundingClientRect();
+            startX = clientX; startY = clientY;
+            startLeft = rect.left; startTop = rect.top;
+            dragging = true;
+            panel.style.transition = 'none';
+        };
+        const moveDrag = (clientX, clientY) => {
+            if(!dragging) return;
+            let nx = startLeft + clientX - startX;
+            let ny = startTop + clientY - startY;
+            nx = Math.max(-panel.offsetWidth + 40, Math.min(window.innerWidth - 40, nx));
+            ny = Math.max(8, Math.min(window.innerHeight - 40, ny));
+            panel.style.left = nx + 'px';
+            panel.style.top = ny + 'px';
+        };
+        const endDrag = () => {
+            dragging = false;
+            panel.style.transition = '';
+        };
+
+        handle.addEventListener('mousedown', e => {
+            if(e.target.closest('button, input, select')) return;
+            e.preventDefault();
+            startDrag(e.clientX, e.clientY);
+        });
+        document.addEventListener('mousemove', e => {
+            moveDrag(e.clientX, e.clientY);
+        });
+        document.addEventListener('mouseup', () => endDrag());
+
+        handle.addEventListener('touchstart', e => {
+            if(e.target.closest('button, input, select')) return;
+            const t = e.touches[0];
+            startDrag(t.clientX, t.clientY);
+        }, {passive:false});
+        document.addEventListener('touchmove', e => {
+            if(!dragging) return;
+            const t = e.touches[0];
+            moveDrag(t.clientX, t.clientY);
+            e.preventDefault();
+        }, {passive:false});
+        document.addEventListener('touchend', endDrag);
+    }
+
+    function togglePanel(panel, btn, bodySelector) {
+        panel.classList.toggle('collapsed');
+        btn.textContent = panel.classList.contains('collapsed') ? '▸' : '▾';
+        const body = panel.querySelector(bodySelector);
+        if(body) body.style.display = panel.classList.contains('collapsed') ? 'none' : '';
+    }
+
+    window.addEventListener('load', () => {
+        initPanelPosition(setupPanel);
+        initPanelPosition(instructionsPanel);
+        const ibRect = instructionBox.getBoundingClientRect();
+        instructionBox.style.left = (window.innerWidth / 2 - ibRect.width / 2) + 'px';
+        instructionBox.style.top = (window.innerHeight - ibRect.height - 20) + 'px';
+        initPanelPosition(instructionBox);
+
+        makeDraggable(setupPanel, '.panel-header');
+        makeDraggable(instructionsPanel, '.panel-header');
+        makeDraggable(instructionBox, '.instruction-main');
+    });
+    document.getElementById('toggle-setup-panel').addEventListener('click', function(){ togglePanel(setupPanel, this, '.panel-body'); });
+    document.getElementById('toggle-instructions-panel').addEventListener('click', function(){ togglePanel(instructionsPanel, this, '.panel-body'); });
+    document.getElementById('toggle-bottom-panel').addEventListener('click', function(){ togglePanel(instructionBox, this, '.instruction-body'); });
+
+    function switchModeUI(prefix, mode) {
+        ['gps', 'tap', 'coords', 'search'].forEach(m => {
+            const el = document.getElementById(`${prefix}-mode-${m}`);
+            if (el) el.style.display = (m === mode ? 'block' : 'none');
+        });
+    }
+    document.getElementById('start-mode').addEventListener('change', e => switchModeUI('start', e.target.value));
+    document.getElementById('end-mode').addEventListener('change', e => switchModeUI('end', e.target.value));
+    switchModeUI('start', 'gps');
+    switchModeUI('end', 'tap');
+
+    const BASE_MODE_WEIGHTS = {
+        'car':    { distance:0.55, type:0.09, size:0.05, uniqueness:0.06, opening:0.07, feedback:0.08, visibility:0.05, approach:0.05 },
+        'bike':   { distance:0.50, type:0.09, size:0.06, uniqueness:0.06, opening:0.09, feedback:0.08, visibility:0.06, approach:0.06 },
+        'cycle':  { distance:0.36, type:0.14, size:0.06, uniqueness:0.12, opening:0.09, feedback:0.09, visibility:0.07, approach:0.07 },
+        'walk':   { distance:0.19, type:0.19, size:0.05, uniqueness:0.17, opening:0.12, feedback:0.10, visibility:0.09, approach:0.09 }
+    };
+
+    const landmark_weights = {
+        'hospital':0.9,'temple':0.9,'mosque':0.9,'church':0.9,'gurudwara':0.9,
+        'monument':1.0,'fort':1.0,'university':0.8,'college':0.7,'mall':0.8,
+        'bank':0.7,'police':0.7,'petrol':0.7,'bus_station':0.7,'clinic':0.7,
+        'pharmacy':0.6,'school':0.6,'supermarket':0.6,'hotel':0.6,'restaurant':0.5,
+        'park':0.5,'kirana':0.5,'unknown':0.2,'shop':0.3,'building':0.2
+    };
+    const indian_brands = ['big bazaar','dmart','reliance','more','spencer','apollo','sri','sai','ccd','kfc','mcdonald','starbucks','bata','croma','pantaloons','hdfc','sbi','icici'];
+
+    let current_mode='car', current_time='day', current_weights = BASE_MODE_WEIGHTS['car'];
+    let recentLandmarks = new Set();
+    let currentVisibility = 10000;
+    let currentSpeed = 0;
+
+    async function fetchVisibility(lat, lon){
+        try {
+            const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=visibility,weather_code`);
+            const data = await res.json();
+            if(data.current && data.current.visibility != null){
+                currentVisibility = data.current.visibility;
+            }
+        } catch(e){
+            currentVisibility = 10000;
+        }
+    }
+
+    function visibility_score(distance){
+        if(currentVisibility >= 10000) return 1.0;
+        if(currentVisibility >= 5000){
+            return distance <= 80 ? 1.0 : 0.7;
+        }
+        if(currentVisibility >= 1000){
+            if(distance <= 30) return 1.0;
+            if(distance <= 60) return 0.6;
+            return 0.3;
+        }
+        if(currentVisibility >= 200){
+            if(distance <= 15) return 1.0;
+            if(distance <= 30) return 0.4;
+            return 0.1;
+        }
+        return distance <= 10 ? 0.5 : 0.05;
+    }
+
+    function getSpeedAdaptiveRadius(){
+        const baseRadii = { 'car': 120, 'bike': 75, 'cycle': 75, 'walk': 30 };
+        let base = baseRadii[current_mode] || 120;
+        if(currentSpeed > 0){
+            const speedFactor = Math.min(2.0, Math.max(0.5, currentSpeed / 10));
+            base = Math.round(base * speedFactor);
+            base = Math.max(20, Math.min(250, base));
+        }
+        const visFactor = Math.min(1.0, currentVisibility / 5000);
+        base = Math.round(base * Math.max(0.3, visFactor));
+        return Math.max(20, base);
+    }
+
+    function set_travel_mode(mode, time_of_day){
+        current_mode = (mode in BASE_MODE_WEIGHTS)? mode : 'car';
+        current_time = time_of_day || 'day';
+        current_weights = BASE_MODE_WEIGHTS[current_mode];
+    }
+
+    function haversine(lat1, lon1, lat2, lon2){
+        const toRad = x => x*Math.PI/180;
+        const R = 6371000;
+        const dLat = toRad(lat2 - lat1);
+        const dLon = toRad(lon2 - lon1);
+        const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        return R * c;
+    }
+
+    function bearing(lat1, lon1, lat2, lon2){
+        const toRad = x => x*Math.PI/180;
+        const toDeg = x => x*180/Math.PI;
+        const dLon = toRad(lon2 - lon1);
+        const y = Math.sin(dLon) * Math.cos(toRad(lat2));
+        const x = Math.cos(toRad(lat1))*Math.sin(toRad(lat2)) - Math.sin(toRad(lat1))*Math.cos(toRad(lat2))*Math.cos(dLon);
+        return (toDeg(Math.atan2(y, x)) + 360) % 360;
+    }
+
+    function approach_direction_score(prevLat, prevLon, maneuverLat, maneuverLon, lmLat, lmLon){
+        if(prevLat == null || maneuverLat == null) return 0.5;
+        const routeBearing = bearing(prevLat, prevLon, maneuverLat, maneuverLon);
+        const lmBearing = bearing(prevLat, prevLon, lmLat, lmLon);
+        let diff = Math.abs(routeBearing - lmBearing);
+        if(diff > 180) diff = 360 - diff;
+        if(diff <= 30) return 1.0;
+        if(diff <= 60) return 0.85;
+        if(diff <= 90) return 0.6;
+        if(diff <= 120) return 0.4;
+        return 0.2;
+    }
+
+    function getLandmarkSide(prevLat, prevLon, maneuverLat, maneuverLon, lmLat, lmLon){
+        if(prevLat == null || maneuverLat == null) return null;
+        const routeBearing = bearing(prevLat, prevLon, maneuverLat, maneuverLon);
+        const lmBearing = bearing(prevLat, prevLon, lmLat, lmLon);
+        let diff = lmBearing - routeBearing;
+        if(diff < -180) diff += 360;
+        if(diff > 180) diff -= 360;
+        return diff >= 0 ? 'right' : 'left';
+    }
+
+    function expanded_distance_score(d){
+        if(d <=10) return 1.0;
+        if(d <=20) return 0.9;
+        if(d <=30) return 0.8;
+        if(d <=40) return 0.7;
+        if(d <=50) return 0.6;
+        if(d <=60) return 0.5;
+        if(d <=70) return 0.4;
+        if(d <=80) return 0.3;
+        if(d <=90) return 0.2;
+        return 0.1;
+    }
+
+    function size_score(tags, elementType){
+        let s = 0;
+        if(tags && tags['building:levels']){
+            try {
+                const lv = parseInt(tags['building:levels']);
+                if(lv >= 5) s += 0.8;
+                else if(lv >= 3) s += 0.5;
+            } catch(e){}
+        }
+        if(elementType === 'way') s += 0.4;
+        return Math.min(1, s);
+    }
+
+    function uniqueness_score(name){
+        let s = 0;
+        const nl = (name||'').toLowerCase();
+        if(indian_brands.some(b => nl.includes(b))) s += 0.7;
+        if(['complex','plaza','tower','central'].some(w=>nl.includes(w))) s += 0.4;
+        if(['sri','shri','sai','lakshmi','ganesh'].some(t=>nl.includes(t))) s += 0.3;
+        return Math.min(1, s);
+    }
+
+    const always_open_types = ['temple','mosque','church','gurudwara','monument','fort','park','bus_station','police'];
+    const twentyfour_seven_types = ['hospital','petrol','atm'];
+
+    function opening_hours_score(tags, lmType){
+        if(always_open_types.includes(lmType)) return 1.0;
+        if(twentyfour_seven_types.includes(lmType)) return 1.0;
+
+        const oh = (tags && tags['opening_hours']) ? tags['opening_hours'].trim() : '';
+
+        if(!oh) return 0.5;
+        if(oh === '24/7') return 1.0;
+        if(oh.toLowerCase() === 'closed' || oh.toLowerCase() === 'off') return 0.0;
+
+        const now = new Date();
+        const currentDay = now.getDay();
+        const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+        const dayMap = { 'mo':1, 'tu':2, 'we':3, 'th':4, 'fr':5, 'sa':6, 'su':0 };
+
+        const rules = oh.split(';').map(r => r.trim());
+
+        for(const rule of rules){
+            const rl = rule.toLowerCase();
+            const match = rl.match(/^([a-z, -]+)\s+(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})$/);
+            if(!match) continue;
+
+            const dayPart = match[1].trim();
+            const openTime = match[2];
+            const closeTime = match[3];
+
+            const [oh1, om1] = openTime.split(':').map(Number);
+            const [ch1, cm1] = closeTime.split(':').map(Number);
+            const openMin = oh1 * 60 + om1;
+            const closeMin = ch1 * 60 + cm1;
+
+            let dayMatches = false;
+
+            const rangeMatch = dayPart.match(/^([a-z]{2})\s*-\s*([a-z]{2})$/);
+            if(rangeMatch){
+                const startDay = dayMap[rangeMatch[1]];
+                const endDay = dayMap[rangeMatch[2]];
+                if(startDay !== undefined && endDay !== undefined){
+                    if(startDay <= endDay){
+                        dayMatches = (currentDay >= startDay && currentDay <= endDay);
+                    } else {
+                        dayMatches = (currentDay >= startDay || currentDay <= endDay);
+                    }
+                }
+            }
+
+            if(!dayMatches && dayPart.includes(',')){
+                const days = dayPart.split(',').map(d => d.trim());
+                dayMatches = days.some(d => dayMap[d] === currentDay);
+            }
+
+            if(!dayMatches && dayMap[dayPart] !== undefined){
+                dayMatches = (dayMap[dayPart] === currentDay);
+            }
+
+            if(dayMatches){
+                if(closeMin <= openMin){
+                    if(currentMinutes >= openMin || currentMinutes < closeMin) return 1.0;
+                } else {
+                    if(currentMinutes >= openMin && currentMinutes < closeMin) return 1.0;
+                }
+                return 0.0;
+            }
+        }
+
+        const simpleTime = oh.match(/^(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})$/);
+        if(simpleTime){
+            const [, open, close] = simpleTime;
+            const [oh2, om2] = open.split(':').map(Number);
+            const [ch2, cm2] = close.split(':').map(Number);
+            const openMin = oh2 * 60 + om2;
+            const closeMin = ch2 * 60 + cm2;
+            if(closeMin <= openMin){
+                return (currentMinutes >= openMin || currentMinutes < closeMin) ? 1.0 : 0.0;
+            }
+            return (currentMinutes >= openMin && currentMinutes < closeMin) ? 1.0 : 0.0;
+        }
+
+        return 0.5;
+    }
+
+    const FEEDBACK_STORAGE_KEY = 'landnav_landmark_feedback';
+
+    function loadFeedbackStore(){
+        try {
+            const raw = localStorage.getItem(FEEDBACK_STORAGE_KEY);
+            return raw ? JSON.parse(raw) : {};
+        } catch(e){ return {}; }
+    }
+
+    function saveFeedbackStore(store){
+        try { localStorage.setItem(FEEDBACK_STORAGE_KEY, JSON.stringify(store)); } catch(e){}
+    }
+
+    function recordFeedback(landmarkName, vote){
+        const store = loadFeedbackStore();
+        const key = landmarkName.toLowerCase().trim();
+        if(!store[key]) store[key] = { up: 0, down: 0 };
+        if(vote === 'up') store[key].up++;
+        else if(vote === 'down') store[key].down++;
+        saveFeedbackStore(store);
+        return store[key];
+    }
+
+    function getFeedback(landmarkName){
+        const store = loadFeedbackStore();
+        const key = (landmarkName || '').toLowerCase().trim();
+        return store[key] || null;
+    }
+
+    function feedback_score(name){
+        const fb = getFeedback(name);
+        if(!fb || (fb.up + fb.down) === 0) return 0.5;
+
+        const n = fb.up + fb.down;
+        const p = fb.up / n;
+        const z = 1.96;
+        const denominator = 1 + z*z/n;
+        const centre = p + z*z/(2*n);
+        const spread = z * Math.sqrt((p*(1-p) + z*z/(4*n)) / n);
+        const wilson = (centre - spread) / denominator;
+        return Math.max(0, Math.min(1, wilson));
+    }
+
+    function categorize(tags, name){
+        const nl = (name||'').toLowerCase();
+        if(nl.includes('hospital')||nl.includes('health')) return 'hospital';
+        if(nl.includes('clinic')||nl.includes('dental')) return 'clinic';
+        if(nl.includes('pharmacy')||nl.includes('chemist')) return 'pharmacy';
+        if(nl.includes('temple')||nl.includes('mandir')||nl.includes('kovil')) return 'temple';
+        if(nl.includes('masjid')||nl.includes('mosque')) return 'mosque';
+        if(nl.includes('church')) return 'church';
+        if(nl.includes('gurudwara')) return 'gurudwara';
+        if(nl.includes('mall')||nl.includes('shopping')) return 'mall';
+        if(nl.includes('hotel')) return 'hotel';
+        if(nl.includes('restaurant')||nl.includes('dhaba')) return 'restaurant';
+        for(const key of ['amenity','shop','tourism','historic','building']){
+            if(tags && tags[key]){
+                const v = tags[key];
+                if(v in landmark_weights) return v;
+            }
+        }
+        return 'unknown';
+    }
+
+    function comprehensive_score(tags, lmType, distance, name, elementType, prevLat, prevLon, maneuverLat, maneuverLon, lmLat, lmLon){
+        const type_s = landmark_weights[lmType] || 0.2;
+        const dist_s = expanded_distance_score(distance);
+        const size_s = size_score(tags, elementType);
+        const uniq = uniqueness_score(name);
+        const open_s = opening_hours_score(tags, lmType);
+        const fb_s = feedback_score(name);
+        const vis_s = visibility_score(distance);
+        const appr_s = approach_direction_score(prevLat, prevLon, maneuverLat, maneuverLon, lmLat, lmLon);
+
+        let total = (type_s * current_weights.type)
+                  + (dist_s * current_weights.distance)
+                  + (size_s * current_weights.size)
+                  + (uniq * current_weights.uniqueness)
+                  + (open_s * current_weights.opening)
+                  + (fb_s * current_weights.feedback)
+                  + (vis_s * current_weights.visibility)
+                  + (appr_s * current_weights.approach);
+
+        if(current_time === 'night'){
+            if(['petrol','hospital','hotel','restaurant','atm'].includes(lmType)) total += 0.2;
+            if(['park','garden','school','museum'].includes(lmType)) total -= 0.2;
+            if(open_s === 0.0) total -= 0.15;
+        }
+        if(current_mode === 'walk'){
+            if(['atm','kirana','bus_station'].includes(lmType)) total += 0.1;
+        }
+        if(current_mode === 'car'){
+            if(['petrol','mall','university'].includes(lmType)) total += 0.1;
+        }
+
+        if(currentSpeed > 15){
+            if(size_s >= 0.5) total += 0.05;
+            if(distance > 80) total += 0.03;
+        } else if(currentSpeed > 0 && currentSpeed <= 3){
+            if(distance <= 20) total += 0.05;
+        }
+
+        return Math.max(0, Math.min(1, total));
+    }
+
+    async function get_landmarks_from_overpass(lat, lon, radius, prevLat, prevLon){
+        const q = `[out:json][timeout:25];
+    (
+      node["amenity"](around:${radius},${lat},${lon});
+      node["shop"](around:${radius},${lat},${lon});
+      node["tourism"](around:${radius},${lat},${lon});
+      node["historic"](around:${radius},${lat},${lon});
+      node["building"](around:${radius},${lat},${lon});
+      way["amenity"](around:${radius},${lat},${lon});
+      way["shop"](around:${radius},${lat},${lon});
+      way["tourism"](around:${radius},${lat},${lon});
+      way["building"](around:${radius},${lat},${lon});
+    );
+    out center;`;
+        try {
+            const res = await fetch('https://overpass-api.de/api/interpreter', { method:'POST', body:q, headers:{ 'Content-Type':'text/plain' } });
+            if(!res.ok) throw new Error('Overpass '+res.status);
+            const data = await res.json();
+            const items = [];
+            for(const el of (data.elements||[])){
+                const tags = el.tags || {};
+                const name = (tags.name||'').trim();
+                if(!name || name.length < 2) continue;
+                let latLm=null, lonLm=null;
+                if(el.type === 'node'){ latLm = el.lat; lonLm = el.lon; }
+                else if(el.type === 'way' && el.center){ latLm = el.center.lat; lonLm = el.center.lon; }
+                if(!latLm || !lonLm) continue;
+                const d = haversine(lat, lon, latLm, lonLm);
+                if(d > radius) continue;
+                const lmType = categorize(tags, name);
+                const sal = comprehensive_score(tags, lmType, d, name, el.type, prevLat, prevLon, lat, lon, latLm, lonLm);
+                if(sal < 0.2) continue;
+                items.push({ name, type: lmType, latitude: latLm, longitude: lonLm, distance_from_point: Math.round(d), salience_score: sal, properties: tags, elementType: el.type });
+            }
+            return items;
+        } catch(e){
+            return [];
+        }
+    }
+
+    async function get_all_landmarks_for_point(lat, lon, prevLat, prevLon){
+        const radius = getSpeedAdaptiveRadius();
+        const ov = await get_landmarks_from_overpass(lat, lon, radius, prevLat, prevLon);
+        const filtered = ov.filter(lm => !recentLandmarks.has(lm.name));
+        const byName = {};
+        for(const lm of filtered){
+            if(!byName[lm.name] || byName[lm.name].salience_score < lm.salience_score) byName[lm.name] = lm;
+        }
+        return Object.values(byName).sort((a,b)=>b.salience_score - a.salience_score);
+    }
+
+    function build_instruction_text(step, chosen, prevLat, prevLon){
+        const m = step.maneuver || {};
+        const mType = m.type || '';
+        const modifier = (m.modifier || '').toLowerCase();
+        const road = step.name || '';
+        let decision_distance = null;
+        let side = null;
+
+        if(!chosen){
+            if(mType === 'depart') return { text: (`Head ${modifier || ''} on ${road}`).trim(), decision_distance, side };
+            if(mType === 'arrive') return { text: (`You have arrived${road ? ' at ' + road : ''}`).trim(), decision_distance, side };
+            if(modifier && road) return { text: (`Turn ${modifier} onto ${road}`).trim(), decision_distance, side };
+            if(modifier) return { text: (`Turn ${modifier}`).trim(), decision_distance, side };
+            return { text: (road ? `Continue on ${road}` : 'Continue straight'), decision_distance, side };
+        }
+
+        const lmLat = chosen.latitude, lmLon = chosen.longitude;
+        const maneuverLat = (step.maneuver && step.maneuver.location) ? step.maneuver.location[1] : null;
+        const maneuverLon = (step.maneuver && step.maneuver.location) ? step.maneuver.location[0] : null;
+        const distLmToManeuver = chosen.distance_from_point || (maneuverLat ? Math.round(haversine(lmLat, lmLon, maneuverLat, maneuverLon)) : null);
+        decision_distance = (distLmToManeuver != null) ? Math.round(distLmToManeuver) : null;
+
+        side = getLandmarkSide(prevLat, prevLon, maneuverLat, maneuverLon, lmLat, lmLon);
+
+        const prevToLm = (prevLat != null && prevLon != null) ? haversine(prevLat, prevLon, lmLat, lmLon) : Infinity;
+        const prevToManeuver = (prevLat != null && prevLon != null && maneuverLat!=null) ? haversine(prevLat, prevLon, maneuverLat, maneuverLon) : Infinity;
+
+        const sideStr = side ? ` <span style="color:#94a3b8;font-size:0.85em;">(on your ${side})</span>` : '';
+        let relation = '';
+        if(distLmToManeuver != null && distLmToManeuver <= 20) {
+            relation = `right at <span class="highlight-landmark">${chosen.name}</span>${sideStr}`;
+        } else {
+            if(prevToLm < prevToManeuver) {
+                relation = `after you pass <span class="highlight-landmark">${chosen.name}</span>${sideStr}`;
+            } else {
+                relation = `just before <span class="highlight-landmark">${chosen.name}</span>${sideStr}`;
+            }
+        }
+
+        let dir = '';
+        if(mType === 'depart') dir = `Head ${modifier || ''}`.trim();
+        else if(mType === 'arrive') dir = `You have arrived`;
+        else if(modifier && road) dir = `Turn ${modifier} onto ${road}`.trim();
+        else if(modifier) dir = `Turn ${modifier}`.trim();
+        else dir = `Continue`;
+
+        return { text: `${dir} ${relation}`, decision_distance, side };
+    }
+
+    let startMarker = null, endMarker = null, routeLayer = null;
+    let landmarksLayerGroup = L.layerGroup().addTo(map);
+    let instructions = [], nextInstructionIdx = 0;
+    let startSource = null, liveNavigationActive = false;
+    let mapTapListener = null, mapTapTarget = null;
+    let watchId = null;
+    let landmarkMarkers = [];
+
+    function setStartFromLatLng(lat, lon, sourceLabel, sourceType) {
+        if (startMarker) map.removeLayer(startMarker);
+        startMarker = L.marker([lat, lon], { icon: userIcon, draggable: true }).addTo(map).bindPopup('Start').openPopup();
+        map.setView([lat, lon], 15);
+        document.getElementById('start-lat').value = lat.toFixed(5);
+        document.getElementById('start-lon').value = lon.toFixed(5);
+        startSource = sourceType;
+        document.getElementById('status').innerText = `Start set from ${sourceLabel}`;
+    }
+
+    function setEndFromLatLng(lat, lon, sourceLabel) {
+        if (endMarker) map.removeLayer(endMarker);
+        endMarker = L.marker([lat, lon], { draggable: true }).addTo(map).bindPopup('Destination').openPopup();
+        map.setView([lat, lon], 15);
+        document.getElementById('end-lat').value = lat.toFixed(5);
+        document.getElementById('end-lon').value = lon.toFixed(5);
+        document.getElementById('status').innerText = `Destination set from ${sourceLabel}`;
+    }
+
+    function enableTapFor(target) {
+        alert(`Tap on the map to set the ${target} location.`);
+        mapTapTarget = target;
+        if (mapTapListener) map.off('click', mapTapListener);
+        mapTapListener = function (e) {
+            if (mapTapTarget === 'start') setStartFromLatLng(e.latlng.lat, e.latlng.lng, 'map tap', 'tap');
+            else setEndFromLatLng(e.latlng.lat, e.latlng.lng, 'map tap');
+            map.off('click', mapTapListener);
+            mapTapListener = null; mapTapTarget = null;
+        };
+        map.on('click', mapTapListener);
+    }
+
+    // Button Listeners
+    document.getElementById('start-tap-btn').addEventListener('click', () => enableTapFor('start'));
+    document.getElementById('end-tap-btn').addEventListener('click', () => enableTapFor('end'));
+    
+    document.getElementById('start-gps-btn').addEventListener('click', () => {
+        navigator.geolocation.getCurrentPosition(p => setStartFromLatLng(p.coords.latitude, p.coords.longitude, 'GPS', 'gps'), 
+        e => alert('GPS Error: ' + e.message));
+    });
+    
+    document.getElementById('end-gps-btn').addEventListener('click', () => {
+        navigator.geolocation.getCurrentPosition(p => setEndFromLatLng(p.coords.latitude, p.coords.longitude, 'GPS'), 
+        e => alert('GPS Error: ' + e.message));
+    });
+
+    document.getElementById('start-set-coords-btn').addEventListener('click', () => {
+        const lat = parseFloat(document.getElementById('start-lat').value);
+        const lon = parseFloat(document.getElementById('start-lon').value);
+        if(!isNaN(lat) && !isNaN(lon)) setStartFromLatLng(lat, lon, 'coords', 'coords');
+    });
+
+    document.getElementById('end-set-coords-btn').addEventListener('click', () => {
+        const lat = parseFloat(document.getElementById('end-lat').value);
+        const lon = parseFloat(document.getElementById('end-lon').value);
+        if(!isNaN(lat) && !isNaN(lon)) setEndFromLatLng(lat, lon, 'coords');
+    });
+
+    // Nominatim Search
+    async function searchPlaces(which, q) {
+        if(q.length < 3) return;
+        try {
+            const res = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&q=${encodeURIComponent(q)}`);
+            const data = await res.json();
+            const el = document.getElementById(which+'-suggestions');
+            el.innerHTML = '';
+            if(data.length) {
+                el.style.display = 'block';
+                data.forEach(item => {
+                    const div = document.createElement('div');
+                    div.className = 'suggestion-item';
+                    div.innerHTML = `<div class="suggestion-title">${item.display_name.split(',')[0]}</div><div class="suggestion-sub">${item.display_name}</div>`;
+                    div.onclick = () => {
+                        if(which === 'start') setStartFromLatLng(parseFloat(item.lat), parseFloat(item.lon), 'search', 'search');
+                        else setEndFromLatLng(parseFloat(item.lat), parseFloat(item.lon), 'search');
+                        el.style.display = 'none';
+                        document.getElementById(which+'-search').value = item.display_name;
+                    };
+                    el.appendChild(div);
+                });
+            } else el.style.display = 'none';
+        } catch(e) {}
+    }
+    let searchTimer;
+    document.getElementById('start-search').addEventListener('input', (e) => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => searchPlaces('start', e.target.value), 400);
+    });
+    document.getElementById('end-search').addEventListener('input', (e) => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => searchPlaces('end', e.target.value), 400);
+    });
+
+    document.getElementById('get-route-btn').addEventListener('click', fetchRouteFrontend);
+
+    async function fetchRouteFrontend() {
+        if (!startMarker || !endMarker) { alert('Set start and destination.'); return; }
+
+        set_travel_mode(document.getElementById('mode').value, document.getElementById('time_of_day').value);
+
+        const btn = document.getElementById('get-route-btn');
+        btn.disabled = true; btn.innerText = 'Calculating...';
+        document.getElementById('status').innerText = 'Fetching weather & route data...';
+
+        const s = startMarker.getLatLng(), e = endMarker.getLatLng();
+
+        await fetchVisibility(s.lat, s.lng);
+
+        let profile = 'driving';
+        if (current_mode === 'walk') profile = 'walking';
+        else if (current_mode === 'cycle' || current_mode === 'bike') profile = 'cycling';
+
+        document.getElementById('status').innerText = `Routing (visibility: ${Math.round(currentVisibility)}m)...`;
+
+        try {
+            const osrmUrl = `https://router.project-osrm.org/route/v1/${profile}/${s.lng},${s.lat};${e.lng},${e.lat}?overview=full&geometries=geojson&steps=true`;
+            const r = await fetch(osrmUrl);
+            const data = await r.json();
+            if (!data.routes || !data.routes.length) throw new Error('No route found');
+
+            const route = data.routes[0];
+            if (routeLayer) map.removeLayer(routeLayer);
+            routeLayer = L.geoJSON(route.geometry, { style: { color: '#38bdf8', weight: 5 } }).addTo(map);
+            map.fitBounds(routeLayer.getBounds(), { padding: [40, 40] });
+
+            const steps = route.legs[0].steps;
+            instructions = [];
+            recentLandmarks = new Set();
+            landmarksLayerGroup.clearLayers();
+            landmarkMarkers = [];
+
+            let prevLat = s.lat, prevLon = s.lng;
+
+            for (let i = 0; i < steps.length; i++) {
+                const step = steps[i];
+                const loc = step.maneuver.location || (step.geometry.coordinates[0]);
+                const lat = loc[1], lon = loc[0];
+
+                const found = await get_all_landmarks_for_point(lat, lon, prevLat, prevLon);
+                const chosen = (found && found.length) ? found[0] : null;
+
+                let lmMarker = null;
+                if(chosen) {
+                    recentLandmarks.add(chosen.name);
+                    lmMarker = L.marker([chosen.latitude, chosen.longitude], { icon: landmarkIcon })
+                     .addTo(landmarksLayerGroup)
+                     .bindPopup(`<b>${chosen.name}</b><br>Score: ${(chosen.salience_score*100).toFixed(0)}%`);
+                }
+
+                const res = build_instruction_text(step, chosen, prevLat, prevLon);
+
+                instructions.push({
+                    text: res.text,
+                    decision_distance: res.decision_distance,
+                    side: res.side,
+                    turn_location: [lat, lon],
+                    landmark: chosen,
+                    candidates: found || [],
+                    chosenIndex: 0,
+                    stepData: step,
+                    prevLat: prevLat,
+                    prevLon: prevLon
+                });
+                landmarkMarkers.push(lmMarker);
+
+                L.marker([lat, lon], {icon: turnIcon}).addTo(landmarksLayerGroup);
+
+                prevLat = lat; prevLon = lon;
+            }
+
+            renderInstructionList();
+
+            const visLabel = currentVisibility >= 10000 ? 'clear' : currentVisibility >= 1000 ? 'moderate' : 'low';
+            document.getElementById('status').innerText = `Route: ${instructions.length} steps | Visibility: ${visLabel} (${Math.round(currentVisibility)}m)`;
+
+            if (startSource === 'gps' && confirm('Start Navigation Mode (Live Tracking)?')) {
+                liveNavigationActive = true;
+                instructionBox.style.display = 'block';
+                startLiveTracking();
+            } else {
+                instructionBox.style.display = 'none';
+            }
+
+        } catch (err) {
+            alert('Error: ' + err.message);
+        } finally {
+            btn.disabled = false; btn.innerText = '▶ Start Navigation';
+        }
+    }
+
+    function replaceLandmarkAtStep(stepIdx){
+        const ins = instructions[stepIdx];
+        if(!ins || !ins.candidates || ins.candidates.length <= 1) return false;
+
+        // Record feedback for the rejected landmark
+        if(ins.landmark) recordFeedback(ins.landmark.name, 'down');
+
+        // Move to next candidate
+        ins.chosenIndex++;
+        if(ins.chosenIndex >= ins.candidates.length){
+            // No more candidates — fall back to no landmark
+            ins.landmark = null;
+            const res = build_instruction_text(ins.stepData, null, ins.prevLat, ins.prevLon);
+            ins.text = res.text;
+            ins.decision_distance = res.decision_distance;
+        } else {
+            const newChosen = ins.candidates[ins.chosenIndex];
+            ins.landmark = newChosen;
+            const res = build_instruction_text(ins.stepData, newChosen, ins.prevLat, ins.prevLon);
+            ins.text = res.text;
+            ins.decision_distance = res.decision_distance;
+        }
+
+        // Update map marker
+        if(landmarkMarkers[stepIdx]){
+            landmarksLayerGroup.removeLayer(landmarkMarkers[stepIdx]);
+            landmarkMarkers[stepIdx] = null;
+        }
+        if(ins.landmark){
+            landmarkMarkers[stepIdx] = L.marker([ins.landmark.latitude, ins.landmark.longitude], { icon: landmarkIcon })
+                .addTo(landmarksLayerGroup)
+                .bindPopup(`<b>${ins.landmark.name}</b><br>Score: ${(ins.landmark.salience_score*100).toFixed(0)}%`);
+        }
+
+        // Re-render the list
+        renderInstructionList();
+        return true;
+    }
+
+    function renderInstructionList(){
+        const listEl = document.getElementById('route-steps');
+        listEl.innerHTML = '<ol id="route-steps-list">' +
+            instructions.map((ins, i) => {
+                const dd = (ins.decision_distance != null) ? `<span class="instruction-distance">${ins.decision_distance} m</span>` : '';
+                const lmName = ins.landmark ? ins.landmark.name : '';
+                const hasMore = ins.candidates && ins.chosenIndex < ins.candidates.length - 1;
+                const fbHtml = lmName ? `<span class="feedback-btns">`
+                    + `<button class="fb-btn fb-up" data-fb-step="${i}" data-fb-vote="up" title="Helpful landmark">&#x1F44D;</button>`
+                    + (hasMore ? `<button class="fb-btn fb-down" data-fb-step="${i}" data-fb-vote="down" title="Show next best landmark">&#x1F44E;</button>` : '')
+                    + `</span>` : '';
+                return `<li class="step-item step-static" data-step="${i}"><span class="step-text">${ins.text}</span>${dd}${fbHtml}</li>`;
+            }).join('') +
+            '</ol>';
+
+        // Setup Listeners for list clicks (pan to location)
+        document.querySelectorAll('.step-item').forEach(el => {
+            el.addEventListener('click', (e) => {
+                if(e.target.closest('.fb-btn')) return;
+                const idx = el.getAttribute('data-step');
+                const loc = instructions[idx].turn_location;
+                map.panTo(loc);
+            });
+        });
+
+        // Setup feedback button listeners
+        document.querySelectorAll('.fb-btn[data-fb-step]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const stepIdx = parseInt(btn.getAttribute('data-fb-step'));
+                const vote = btn.getAttribute('data-fb-vote');
+                const ins = instructions[stepIdx];
+                if(!ins || !ins.landmark) return;
+
+                if(vote === 'down'){
+                    // Record negative feedback and replace with next candidate
+                    replaceLandmarkAtStep(stepIdx);
+                } else {
+                    // Record positive feedback
+                    recordFeedback(ins.landmark.name, 'up');
+                    btn.classList.add('active');
+                    setTimeout(() => btn.classList.remove('active'), 1200);
+                }
+            });
+        });
+    }
+
+    function startLiveTracking() {
+        if (!navigator.geolocation) return;
+        if (watchId) navigator.geolocation.clearWatch(watchId);
+
+        watchId = navigator.geolocation.watchPosition(pos => {
+            const lat = pos.coords.latitude, lon = pos.coords.longitude;
+            currentSpeed = pos.coords.speed || 0;
+
+            let nearestIdx = 0, minD = Infinity;
+            instructions.forEach((ins, i) => {
+                const d = haversine(lat, lon, ins.turn_location[0], ins.turn_location[1]);
+                if(d < minD) { minD = d; nearestIdx = i; }
+            });
+
+            const ins = instructions[nearestIdx];
+            document.getElementById('instruction-text').innerHTML = ins.text;
+            document.getElementById('distance-to-turn').innerHTML = `<strong>${Math.round(minD)} m</strong> to turn`;
+
+            const ddEl = document.getElementById('decision-distance');
+            if(ins.decision_distance != null) ddEl.innerHTML = `<strong>${ins.decision_distance} m</strong> decision dist`;
+            else ddEl.innerHTML = '';
+
+            document.querySelectorAll('.step-item').forEach((el, i) => {
+                el.className = 'step-item ' + (i === nearestIdx ? 'step-current' : (i < nearestIdx ? 'step-past' : 'step-upcoming'));
+            });
+
+            if(ins.landmark){
+                document.getElementById('live-landmark-name').innerHTML = ins.landmark.name;
+                const fbRow = document.getElementById('live-feedback-row');
+                fbRow.style.display = 'flex';
+                fbRow.setAttribute('data-live-landmark', ins.landmark.name);
+                fbRow.setAttribute('data-live-step', nearestIdx);
+            } else {
+                document.getElementById('live-landmark-name').innerHTML = '';
+                document.getElementById('live-feedback-row').style.display = 'none';
+            }
+
+        }, e => {}, {enableHighAccuracy: true});
+    }
+
+    document.getElementById('live-fb-up').addEventListener('click', () => {
+        const lmName = document.getElementById('live-feedback-row').getAttribute('data-live-landmark');
+        if(!lmName) return;
+        recordFeedback(lmName, 'up');
+        document.getElementById('live-fb-up').classList.add('active');
+        setTimeout(() => document.getElementById('live-fb-up').classList.remove('active'), 1200);
+    });
+
+    document.getElementById('live-fb-down').addEventListener('click', () => {
+        const lmName = document.getElementById('live-feedback-row').getAttribute('data-live-landmark');
+        if(!lmName) return;
+        const stepIdx = instructions.findIndex(ins => ins.landmark && ins.landmark.name === lmName);
+        if(stepIdx !== -1){
+            replaceLandmarkAtStep(stepIdx);
+            const ins = instructions[stepIdx];
+            if(ins.landmark){
+                document.getElementById('instruction-text').innerHTML = ins.text;
+                document.getElementById('live-landmark-name').innerHTML = ins.landmark.name;
+                document.getElementById('live-feedback-row').setAttribute('data-live-landmark', ins.landmark.name);
+            } else {
+                document.getElementById('instruction-text').innerHTML = ins.text;
+                document.getElementById('live-landmark-name').innerHTML = '';
+                document.getElementById('live-feedback-row').style.display = 'none';
+            }
+        }
+    });
+
+    </script>
+</body>
+</html>
